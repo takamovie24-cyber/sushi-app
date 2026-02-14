@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertTriangle, Wine, ChevronRight, RotateCcw, X } from 'lucide-react';
 
 /* ===== 定数 ===== */
@@ -11,8 +11,6 @@ const DISHES = [
 ];
 
 const TABLES = ['11','12','21','22','31','32','33'];
-
-/* ===== 型 ===== */
 
 type Note = {
   dishIndex: number;
@@ -27,7 +25,7 @@ type SpecialDish = {
 
 type TableState = {
   currentDish: number;
-  served: boolean[];
+  served: number[];
   pairing: boolean;
   allergies: Note[];
   specials: SpecialDish[];
@@ -35,21 +33,32 @@ type TableState = {
 
 type Mode = 'allergy' | 'special';
 
-/* ===== 本体 ===== */
-
 export default function Page() {
-  const [tableData, setTableData] = useState<Record<string, TableState>>(() => {
+
+  /* ===== 初期データ生成 ===== */
+
+  const createInitialState = (): Record<string, TableState> => {
     const init: Record<string, TableState> = {};
     TABLES.forEach(t => {
       init[t] = {
         currentDish: 1,
-        served: Array(13).fill(false),
+        served: Array(13).fill(0),
         pairing: false,
         allergies: [],
         specials: []
       };
     });
     return init;
+  };
+
+  /* ===== state ===== */
+
+  const [tableData, setTableData] = useState<Record<string, TableState>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('sushi-table-data');
+      if (saved) return JSON.parse(saved);
+    }
+    return createInitialState();
   });
 
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
@@ -59,45 +68,81 @@ export default function Page() {
   const [viewingNote, setViewingNote] = useState<Note | null>(null);
   const [selectingDish, setSelectingDish] = useState(false);
 
-  /* ===== 操作 ===== */
+  /* ===== 🔥 自動保存 ===== */
 
-  const resetTable = (table: string) => {
-    setTableData(prev => ({
-      ...prev,
-      [table]: {
-        currentDish: 1,
-        served: Array(13).fill(false),
-        pairing: false,
-        allergies: [],
-        specials: []
-      }
-    }));
-  };
+  useEffect(() => {
+    localStorage.setItem('sushi-table-data', JSON.stringify(tableData));
+  }, [tableData]);
+
+  /* ===== 次へ ===== */
 
   const nextDish = (table: string) => {
     setTableData(prev => {
       const cur = prev[table].currentDish;
       if (cur > 13) return prev;
+
       const served = [...prev[table].served];
-      served[cur - 1] = true;
+      const index = cur - 1;
+
+      if (served[index] < 2) {
+        served[index] += 1;
+        return { ...prev, [table]: { ...prev[table], served } };
+      }
+
+      served[index] = 3;
+
       return {
         ...prev,
-        [table]: { ...prev[table], served, currentDish: cur + 1 }
+        [table]: {
+          ...prev[table],
+          served,
+          currentDish: cur + 1
+        }
       };
     });
   };
 
-  const toggleSpecialProvided = (table: string, idx: number) => {
+  /* ===== 戻る ===== */
+
+  const prevDish = (table: string) => {
+    setTableData(prev => {
+      const cur = prev[table].currentDish;
+      const served = [...prev[table].served];
+      const index = cur - 1;
+
+      if (served[index] > 0 && served[index] < 3) {
+        served[index] -= 1;
+        return { ...prev, [table]: { ...prev[table], served } };
+      }
+
+      if (cur > 1) {
+        const prevIndex = cur - 2;
+        if (served[prevIndex] === 3) served[prevIndex] = 2;
+
+        return {
+          ...prev,
+          [table]: {
+            ...prev[table],
+            served,
+            currentDish: cur - 1
+          }
+        };
+      }
+
+      return prev;
+    });
+  };
+
+  /* ===== リセット ===== */
+
+  const resetTable = (table: string) => {
     setTableData(prev => ({
       ...prev,
-      [table]: {
-        ...prev[table],
-        specials: prev[table].specials.map(s =>
-          s.dishIndex === idx ? { ...s, provided: !s.provided } : s
-        )
-      }
+      [table]: createInitialState()[table]
     }));
   };
+
+  /* ===== メモ保存 ===== */
 
   const saveNote = () => {
     if (!selectedTable || editingDish === null || !mode) return;
@@ -135,44 +180,64 @@ export default function Page() {
     setMemo('');
   };
 
+  const toggleSpecialProvided = (table: string, idx: number) => {
+    setTableData(prev => ({
+      ...prev,
+      [table]: {
+        ...prev[table],
+        specials: prev[table].specials.map(s =>
+          s.dishIndex === idx ? { ...s, provided: !s.provided } : s
+        )
+      }
+    }));
+  };
+
+  /* ===== 色 ===== */
+
   const cellStyle = (table: string, idx: number) => {
     const t = tableData[table];
-    const isCurrent = t.currentDish === idx + 1;
-    const isServed = t.served[idx];
+    const value = t.served[idx];
 
     let cls =
-      'flex-1 relative flex items-center justify-center text-5xl font-black ';
-    if (isCurrent) cls += 'bg-emerald-500 text-white ring-4 ring-emerald-300';
-    else if (isServed) cls += 'bg-slate-200 text-slate-400';
-    else cls += 'bg-white border-2 border-slate-300';
+      'flex-1 relative flex items-center justify-center text-4xl font-black ';
+
+    if (value === 3)
+      cls += 'bg-slate-300 text-slate-700';
+    else if (value === 2)
+      cls += 'bg-emerald-500 text-white';
+    else if (value === 1)
+      cls += 'bg-yellow-400 text-black';
+    else if (t.currentDish === idx + 1)
+      cls += 'bg-white border-4 border-emerald-500';
+    else
+      cls += 'bg-white border-2 border-slate-300';
 
     return cls;
   };
 
-  /* ===== 画面 ===== */
+  /* ===== UI ===== */
 
   return (
     <div className="w-screen h-screen bg-slate-900 flex text-white">
-      {/* 左：料理一覧 */}
+
+      {/* 左メニュー */}
       <div className="w-36 bg-slate-800 flex flex-col">
-        <div className="h-40 flex items-center justify-center font-bold">料理</div>
+        <div className="h-32 flex items-center justify-center font-bold">料理</div>
         {DISHES.map((d, i) => (
-          <div
-            key={i}
-            className="flex-1 flex items-center justify-center text-sm border-t border-slate-700"
-          >
+          <div key={i} className="flex-1 flex items-center justify-center text-sm border-t border-slate-700">
             {i + 1}. {d}
           </div>
         ))}
       </div>
 
-      {/* テーブル */}
       {TABLES.map(table => (
         <div key={table} className="flex-1 flex flex-col border-l border-slate-700">
+
           {/* ヘッダ */}
-          <div className="h-40 bg-white text-slate-900 p-2 flex flex-col gap-1">
+          <div className="h-44 bg-white text-slate-900 p-2 flex flex-col gap-1">
+
             <div className="flex justify-between items-center">
-              <div className="text-4xl font-black">{table}</div>
+              <div className="text-3xl font-black">{table}</div>
               <button onClick={() => resetTable(table)}>
                 <RotateCcw />
               </button>
@@ -218,32 +283,34 @@ export default function Page() {
               ⚠ 苦手
             </button>
 
-            <button
-              onClick={() => nextDish(table)}
-              className="bg-emerald-600 text-white rounded text-sm font-bold"
-            >
-              次へ <ChevronRight size={16} />
-            </button>
+            <div className="flex gap-1">
+              <button
+                onClick={() => prevDish(table)}
+                className="flex-1 bg-slate-400 text-white rounded text-sm font-bold"
+              >
+                戻る
+              </button>
+
+              <button
+                onClick={() => nextDish(table)}
+                className="flex-1 bg-emerald-600 text-white rounded text-sm font-bold"
+              >
+                次へ <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
 
-          {/* 料理マス */}
           {DISHES.map((_, i) => {
-            const allergy = tableData[table].allergies.find(
-              (a: Note) => a.dishIndex === i
-            );
-            const special = tableData[table].specials.find(
-              (s: SpecialDish) => s.dishIndex === i
-            );
+            const allergy = tableData[table].allergies.find(a => a.dishIndex === i);
+            const special = tableData[table].specials.find(s => s.dishIndex === i);
 
             return (
               <button
                 key={i}
                 className={cellStyle(table, i)}
-                onClick={() => {
-                  if (special) toggleSpecialProvided(table, i);
-                }}
+                onClick={() => special && toggleSpecialProvided(table, i)}
               >
-                {tableData[table].served[i] && '○'}
+                {tableData[table].served[i] === 3 && '○'}
 
                 {allergy && (
                   <AlertTriangle
@@ -257,7 +324,7 @@ export default function Page() {
 
                 {special && (
                   <div
-                    className={`absolute bottom-1 right-1 w-7 h-7 rounded border-2 flex items-center justify-center text-sm font-black ${
+                    className={`absolute bottom-1 right-1 w-6 h-6 rounded border-2 flex items-center justify-center text-xs font-black ${
                       special.provided
                         ? 'bg-emerald-500 border-emerald-700 text-white'
                         : 'bg-rose-200 border-rose-400 text-slate-900'
@@ -320,7 +387,7 @@ export default function Page() {
         </div>
       )}
 
-      {/* 確認 */}
+      {/* メモ確認 */}
       {viewingNote && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center">
           <div className="bg-white p-6 rounded w-[400px] text-slate-900">
@@ -340,3 +407,4 @@ export default function Page() {
     </div>
   );
 }
+
